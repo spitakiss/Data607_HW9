@@ -1,0 +1,224 @@
+---
+title: 'Wk 9 : NY Times Movie Reviews API'
+author: "Aaron Grzasko"
+date: "October 30, 2016"
+output: 
+    html_document:
+        theme: simplex
+        highlight: haddock
+---
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, comment=NA, warning=FALSE, message=FALSE)
+```
+
+## Assignment Overview  
+  
+In this assignment, I use R to interface with the NY Times movie reviews API.  
+  
+The main goal is to transform the JSON output from the NY Times into an R, data frame format.  
+  
+## Resources  
+I used the following resources to complete this assignment:  
+  
+* [NY Times Movie Reviews documentation](http://developer.nytimes.com/movie_reviews_v2.json): This page provides documentation on the basic mechanics of the movie reviews API.  
+
+* [NY Times Github](https://github.com/NYTimes/public_api_specs/blob/master/movie_reviews/movie_reviews_v2.md)  This document contains supplemental information for using the NY Times movie reviews API.  
+
+* [Vignette on fetching JSON data in R](https://cran.r-project.org/web/packages/jsonlite/vignettes/json-apis.html) The example code from this page relies exclusively on the `fromJSON()` function in the jsonlite` package to read in the JSON format data.  
+  
+
+## Load Libaries  
+```{r}
+if (!require(jsonlite)) install.packages('jsonlite')
+if (!require(knitr)) install.packages('knitr')
+if (!require(DT)) install.packages('DT')
+```
+  
+## API Key and URL for NY Times API 
+  
+While access to the  NY Times API is free, one must first first register [here](http://developer.nytimes.com/signup) to retrieve an API key. This key is required for accessing the data.    
+  
+Refer to the scripts below.  The `api_val` object stores the API key.  
+  
+The `base_url` object stores the URL for the NY Times Movie reviews API.    
+  
+```{r}
+# api key 
+api_val <- "9963c662bb2d444cb55470a17bceacd9"
+
+# url of nyt movie reviews api
+base_url <- "http://api.nytimes.com/svc/movies/v2/reviews/search.json?"
+```
+
+
+## Manipulating the API URL String  
+  
+The NY Times API documentation provides helpful tips on how to query the underlying data.  
+  
+Specifically, the documentation outlines a series of parameters that can be added to the API's base URL for refining search criteria.  
+  
+These parameters include:  
+  
+* *query*: used to match keywords.  When querying, users enter "+" to separate words instead of spaces.  
+* *critics-pick*: "Y" or "N".  Used to distinguish movies that have been "highlighted" by NYT.  
+* *reviewer*: used to limit results to a specific movie critic
+* *publication-date*: this is the date the movie review was originally published in NYT.  Format = "YYYY-MM-DD".  Users can specify both start and end dates by separating the two date values with a semicolon.  
+* *opening-date*:  the date the movie first opened in NYC.  Format = "YYYY-MM-DD".  Users can specify both start and end dates by separating the two date values with a semicolon.  
+* *offset*:  used for extracting multiple pages of records.  The value specified must be whole number multiple of 20, as the API will extract 20 records at a time.  To specify records 21-40, for instance, the user would enter `offset = 20`.  
+* *order*:  this parameter is used to sort the displayed records.  
+  
+
+## Function for Generating Modified URL Strings 
+  
+I created a custom function, `string_append()`, that produces the appropriate URL, given a user's input for various parameter values.  My intent with this function was to partially automate the process of querying the API.  
+
+```{r}
+# url of ny_times
+
+
+string_append <- function(base_url, api_val, query_val,critic_val, reviewer_val, pub_val, opendt_val,offset_val, order_val ){
+    
+    api_string <- base_url 
+    query_cd <- 'query='
+    critic_cd <- "critics-pick=" 
+    pub_cd <- "publication-date="
+    opendt_cd <- "opening-date="
+    offset_cd <- "offset="
+    reviewer_cd <- "reviewer="
+    order_cd <- "order="
+    api_cd <- "&api-key="
+    
+    count_parem <- 0
+    
+    if (!missing(query_val)){
+        count_parem <- count_parem + 1
+        api_string <- paste0(api_string, query_cd,query_val)
+    }
+    if(!missing(critic_val)){
+        ifelse(count_parem == 0, api_string <- paste0(api_string, critic_cd, critic_val), 
+            api_string <- paste0(api_string,"&",critic_cd,critic_val))
+        count_parem <- count_parem + 1
+    }
+    if(!missing(reviewer_val)){
+        ifelse(count_parem == 0, api_string <- paste0(api_string, reviewer_cd, reviewer_val), 
+            api_string <- paste0(api_string,"&",reviewer_cd, reviewer_val))
+        count_parem <- count_parem + 1
+    }
+    
+    if(!missing(pub_val)){
+        ifelse(count_parem == 0,  api_string <- paste0(api_string, pub_cd, pub_val),
+            api_string <- paste0(api_string,"&",pub_cd, pub_val))
+        count_parem <- count_parem + 1
+    } 
+    if(!missing(opendt_val)){
+        ifelse(count_parem == 0,  api_string <- paste0(api_string, opendt_cd, opendt_val), 
+            api_string <- paste0(api_string,"&",opendt_cd, opendt_val))
+        count_parem <- count_parem + 1
+    } 
+    if(!missing(offset_val)){
+        ifelse(count_parem == 0,  api_string <- paste0(api_string, offset_cd, offset_val),
+            api_string <- paste0(api_string,"&",offset_cd, offset_val))
+        count_parem <- count_parem + 1
+    } 
+    if(!missing(order_val)){
+        ifelse(count_parem == 0,  api_string <- paste0(api_string, order_cd, order_val),
+            api_string <- paste0(api_string,"&",order_cd, order_val))
+        count_parem <- count_parem + 1
+    }
+
+    api_string <- paste0(api_string,api_cd, api_val)
+    
+}
+
+ 
+```
+
+## Example 1:  Ghostbusters Movies  
+  
+Let's query the data, using specified parameter values in the `string_append()` function. 
+
+I use the the `fromJSON()` function in the jsonlite package to store the initial data to a data frame object.  
+  
+In this example, I am querying any reviews with the keyword "ghostbuster".  
+  
+
+```{r}
+# search criteria:  keyword = "ghostbuster"
+
+url_string <- string_append(base_url = base_url, api_val = api_val, query_val = "ghostbuster")
+
+# store data as data frame
+raw <- fromJSON(url_string)
+
+# unmodified results
+results <- raw$results
+
+# check names of columns 
+colnames(results)
+
+
+# data scrubbing, and subsetting fields 
+
+results_redux <- subset(results, select = c("display_title","mpaa_rating","critics_pick","publication_date","opening_date","date_updated","link"))
+
+
+results_redux$link_url <- results_redux$link[[2]]
+results_redux <- subset(results_redux, select = c("display_title","mpaa_rating","critics_pick","publication_date","opening_date","date_updated","link_url"))
+
+# print results
+kable(results_redux)
+
+```
+  
+Let's confirm that our data is stored as a data frame:  
+  
+```{r}
+class(results_redux)
+```
+
+## Example 2: 2016 Critics' Picks  
+  
+In this second example, I perform a slightly more complicated search, using the following criteria:  
+  
+
+* opendt_val = "2016-01-01":  movies released 1/1/2016 or later.  
+* critic_val = "Y": movies distinguished as "critics' picks".  
+* offset_val:  using values of 0, 20, and 40 in a for loop to pull 3 pages (or 50 entries) of data.  
+* order_val:  ordering by movie release date  
+  
+  
+```{r}
+
+# initialize empty data frame
+df <- data.frame(display_title = character(),mpaa_rating = character(), critics_pick = integer(),publication_date=character(),opening_date = character(),date_updated = character(),link_url = character())
+
+# loop through first 3 pages of results
+for (i in 0:2){
+    
+    url_string <- string_append(base_url = base_url, api_val = api_val, opendt_val = "2016-01-01", critic_val = "Y", offset_val = i*20,  
+        order_val="by-opening-date")
+    raw <- fromJSON(url_string)
+    result <- raw$result
+    result_redux <- subset(result, 
+        select = c("display_title","mpaa_rating","critics_pick","publication_date","opening_date","date_updated","link"))
+
+    # light data scrubbing
+    result_redux$link_url <- result_redux$link[[2]]
+    result_redux <- subset(result_redux, 
+        select = c("display_title","mpaa_rating","critics_pick","publication_date","opening_date","date_updated","link_url"))    
+
+    df <- rbind(result_redux, df)
+}
+
+# print results
+
+datatable(df)
+```
+  
+  
+Once again, we'll confirm that our data is stored in a data frame:  
+```{r}
+class(df)
+```
